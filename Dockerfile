@@ -24,7 +24,7 @@ FROM node:22-alpine AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
-ENV PORT=3000
+ENV PORT=7860
 
 COPY package*.json ./
 RUN npm install --omit=dev
@@ -33,7 +33,8 @@ COPY --from=builder /app/client/dist ./client/dist
 COPY --from=builder /app/src ./src
 COPY tsconfig.json ./
 RUN npm install -g tsx
+RUN mkdir -p /app/data && chmod -R 777 /app/data
 
-EXPOSE 3000
+EXPOSE 7860 3000
 
 CMD ["tsx", "src/server.ts"]
