@@ -1,0 +1,32 @@
+{
+  "name": "claude-whatsapp-agent",
+  "version": "1.0.0",
+  "description": "Autonomous AI WhatsApp Assistant powered by Claude 3.5 Sonnet, Official WhatsApp Cloud API, WhatsApp Flows, Calendar Booking, and Human Escalation",
+  "main": "src/server.ts",
+  "scripts": {
+    "server": "tsx watch src/server.ts",
+    "client": "npm --prefix client run dev",
+    "dev": "concurrently \"npm run server\" \"npm run client\"",
+    "build:server": "tsc",
+    "build:client": "npm --prefix client run build",
+    "build": "npm run build:server && npm run build:client",
+    "start": "tsx src/server.ts",
+    "test": "tsx test/runAllTests.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.36.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.13.1",
+    "@types/ws": "^8.5.14",
+    "concurrently": "^9.1.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  }
+}

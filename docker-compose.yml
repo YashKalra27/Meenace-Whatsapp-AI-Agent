@@ -1,0 +1,14 @@
+services:
+  claude-whatsapp-agent:
+    build: .
+    container_name: claude-whatsapp-agent
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - NODE_ENV=production
+      - WHATSAPP_VERIFY_TOKEN=claude_whatsapp_secret_verify_token_2026
+      - SIMULATION_MODE=true
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
