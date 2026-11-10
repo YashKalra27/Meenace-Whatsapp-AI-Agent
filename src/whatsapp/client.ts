@@ -72,18 +72,10 @@ export class WhatsAppClient {
       // Automatically simulate delivery and read events after realistic delays
       setTimeout(() => {
         escalationManager.updateMessageStatus(recipientPhone, simulatedMsgId, 'delivered');
-        webhookLogger.broadcast({
-          type: 'STATUS_UPDATE',
-          data: { id: simulatedMsgId, status: 'delivered', recipient_id: cleanPhone }
-        });
       }, 700);
 
       setTimeout(() => {
         escalationManager.updateMessageStatus(recipientPhone, simulatedMsgId, 'read');
-        webhookLogger.broadcast({
-          type: 'STATUS_UPDATE',
-          data: { id: simulatedMsgId, status: 'read', recipient_id: cleanPhone }
-        });
       }, 1800);
 
       return simResponse;

@@ -240,6 +240,6 @@ export interface WebhookLog {
   payload: any;
   response: any;
   error?: string;
-  claudeReasoning?: string;
+  agentReasoning?: string;
   toolsUsed?: string[];
 }

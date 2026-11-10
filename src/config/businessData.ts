@@ -12,7 +12,7 @@ export const servicesCatalog: ServiceItem[] = [
   {
     id: 'srv-whatsapp-bot',
     name: 'Custom WhatsApp AI Agent Implementation',
-    description: 'Complete setup of official Meta WhatsApp Cloud API with Claude 3.5 Sonnet, calendar tools, CRM hooks & Flows.',
+    description: 'Complete setup of official Meta WhatsApp Cloud API with Gemini, calendar tools, CRM hooks & Flows.',
     durationMinutes: 60,
     priceUSD: 1499,
     category: 'Implementation'
@@ -56,7 +56,7 @@ export const defaultBusinessProfile: BusinessProfile = {
     cancellationPolicy: 'Appointments may be cancelled or rescheduled up to 24 hours in advance with a full refund or free reschedule credit. Cancellations within 24 hours are subject to a 50% rescheduling fee.',
     reschedulePolicy: 'Rescheduling is free and can be done anytime prior to the 24-hour cutoff window before your appointment.',
     refundPolicy: 'Full money-back guarantee if you are not completely satisfied with our strategy consultation within 7 days.',
-    aiDisclosurePolicy: 'We are completely transparent that this WhatsApp line is powered by an autonomous Claude AI agent. When asked, always honestly confirm you are an automated AI assistant.',
+    aiDisclosurePolicy: 'We are completely transparent that this WhatsApp line is powered by an autonomous AI agent. When asked, always honestly confirm you are an automated AI assistant.',
     escalationPolicy: 'If a customer requests a human, expresses dissatisfaction, has custom contract inquiries, or requires manual review, immediate escalation occurs and pauses the bot.'
   },
   faqs: [

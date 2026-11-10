@@ -1,4 +1,4 @@
-import Anthropic from '@anthropic-ai/sdk';
+import { GoogleGenAI, Content, FunctionDeclaration } from '@google/genai';
 import dotenv from 'dotenv';
 import { servicesCatalog, defaultBusinessProfile } from '../config/businessData.js';
 import { calendarEngine } from '../calendar/engine.js';
@@ -8,15 +8,18 @@ import { BOOKING_FLOW_ID } from '../flows/bookingFlow.js';
 
 dotenv.config();
 
-const anthropicApiKey = process.env.ANTHROPIC_API_KEY || '';
-const claudeModel = process.env.CLAUDE_MODEL || 'claude-3-5-sonnet-20241022';
-const anthropic = anthropicApiKey ? new Anthropic({ apiKey: anthropicApiKey }) : null;
+const geminiApiKey = process.env.GEMINI_API_KEY || '';
+export const geminiModel = process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite';
+const gemini = geminiApiKey ? new GoogleGenAI({ apiKey: geminiApiKey }) : null;
 
-export const agentTools: Anthropic.Tool[] = [
+// Each tool round trip is one request against the free-tier daily quota
+const MAX_TOOL_ROUNDS = 5;
+
+export const agentTools: FunctionDeclaration[] = [
   {
     name: 'check_calendar_availability',
     description: 'Check available appointment time slots for a given date (YYYY-MM-DD). Returns open slots and whether the business is closed on that day.',
-    input_schema: {
+    parametersJsonSchema: {
       type: 'object',
       properties: {
         date: {
@@ -34,7 +37,7 @@ export const agentTools: Anthropic.Tool[] = [
   {
     name: 'book_appointment',
     description: 'Book and confirm a new appointment for the customer once date, slot, and service are chosen.',
-    input_schema: {
+    parametersJsonSchema: {
       type: 'object',
       properties: {
         customer_name: {
@@ -68,7 +71,7 @@ export const agentTools: Anthropic.Tool[] = [
   {
     name: 'send_booking_flow',
     description: 'Send an interactive native WhatsApp Flow form for appointment booking. Use this when the customer wants a fast, structured 1-click booking experience rather than back-and-forth chat.',
-    input_schema: {
+    parametersJsonSchema: {
       type: 'object',
       properties: {
         customer_phone: {
@@ -86,7 +89,7 @@ export const agentTools: Anthropic.Tool[] = [
   {
     name: 'reschedule_appointment',
     description: 'Reschedule an existing appointment to a new date and time slot.',
-    input_schema: {
+    parametersJsonSchema: {
       type: 'object',
       properties: {
         appointment_id: {
@@ -108,7 +111,7 @@ export const agentTools: Anthropic.Tool[] = [
   {
     name: 'cancel_appointment',
     description: 'Cancel an existing appointment and record the customer reason.',
-    input_schema: {
+    parametersJsonSchema: {
       type: 'object',
       properties: {
         appointment_id: {
@@ -126,7 +129,7 @@ export const agentTools: Anthropic.Tool[] = [
   {
     name: 'lookup_appointments',
     description: 'Look up existing appointments for a customer phone number.',
-    input_schema: {
+    parametersJsonSchema: {
       type: 'object',
       properties: {
         customer_phone: {
@@ -140,7 +143,7 @@ export const agentTools: Anthropic.Tool[] = [
   {
     name: 'get_services_catalog',
     description: 'Retrieve the list of all available services, prices, durations, and descriptions.',
-    input_schema: {
+    parametersJsonSchema: {
       type: 'object',
       properties: {},
       required: []
@@ -149,7 +152,7 @@ export const agentTools: Anthropic.Tool[] = [
   {
     name: 'escalate_to_human',
     description: 'Escalate the conversation to a human manager/operator. Use whenever the customer requests a human, has complex questions outside your scope, is unhappy, or requires manual review.',
-    input_schema: {
+    parametersJsonSchema: {
       type: 'object',
       properties: {
         customer_phone: {
@@ -188,11 +191,11 @@ function buildSystemPrompt(): string {
     `Q: ${f.question}\nA: ${f.answer}`
   ).join('\n\n');
 
-  return `You are Claude, an autonomous WhatsApp AI Assistant for "${defaultBusinessProfile.businessName}".
+  return `You are an autonomous WhatsApp AI Assistant for "${defaultBusinessProfile.businessName}".
 Your line operates on the official WhatsApp Cloud API. You help customers 24/7 by answering questions about our services, checking calendar availability, booking appointments, and confirming reservations.
 
 CRITICAL OPERATING RULES:
-1. TRANSPARENT AI IDENTITY: If asked whether you are a human or a bot, ALWAYS honestly acknowledge you are an autonomous AI assistant powered by Claude. Never pretend to be a human person.
+1. TRANSPARENT AI IDENTITY: If asked whether you are a human or a bot, ALWAYS honestly acknowledge you are an autonomous AI assistant. Never pretend to be a human person.
 2. ESCALATE WHEN UNSURE: If a customer requests a real human, expresses dissatisfaction, or asks anything you cannot confidently answer with the context below, immediately call the "escalate_to_human" tool and inform them our leadership team has been notified.
 3. CONVERSATIONAL & CONCISE: WhatsApp messages must be friendly, clear, and concise. Avoid walls of text. Use bullet points and WhatsApp markdown (*bold* for emphasis).
 4. APPOINTMENT BOOKING:
@@ -234,7 +237,7 @@ export async function executeTool(name: string, input: any): Promise<any> {
         to: input.customer_phone,
         headerText: '📅 Direct Scheduling',
         bodyText: input.prompt_message || 'Please tap below to open our interactive booking form directly in WhatsApp:',
-        footerText: 'Powered by Claude & WhatsApp Cloud API',
+        footerText: 'Powered by WhatsApp Cloud API',
         flowId: BOOKING_FLOW_ID,
         flowCta: 'Open Booking Form',
         screen: 'SERVICE_SELECTION'
@@ -268,7 +271,7 @@ export async function executeTool(name: string, input: any): Promise<any> {
   }
 }
 
-export async function processWithClaude(params: {
+export async function processWithAgent(params: {
   incomingText: string;
   customerPhone: string;
   customerName?: string;
@@ -277,65 +280,54 @@ export async function processWithClaude(params: {
   const { incomingText, customerPhone, customerName } = params;
   const toolsUsed: string[] = [];
 
-  // Check if live Anthropic API key is available
-  if (anthropic && anthropicApiKey) {
+  // Check if live Gemini API key is available
+  if (gemini) {
     try {
-      const messages: Anthropic.MessageParam[] = (params.conversationHistory || []).map(m => ({
-        role: m.role,
-        content: m.content
+      const contents: Content[] = (params.conversationHistory || []).map(m => ({
+        role: m.role === 'assistant' ? 'model' : 'user',
+        parts: [{ text: m.content }]
       }));
 
-      messages.push({
+      contents.push({
         role: 'user',
-        content: `[Sender: ${customerName || 'Customer'} (${customerPhone})]: ${incomingText}`
+        parts: [{ text: `[Sender: ${customerName || 'Customer'} (${customerPhone})]: ${incomingText}` }]
       });
 
-      let response = await anthropic.messages.create({
-        model: claudeModel,
-        max_tokens: 1024,
-        system: buildSystemPrompt(),
-        tools: agentTools,
-        messages
-      });
+      const config = {
+        systemInstruction: buildSystemPrompt(),
+        tools: [{ functionDeclarations: agentTools }],
+        maxOutputTokens: 1024
+      };
+
+      let response = await gemini.models.generateContent({ model: geminiModel, contents, config });
 
       // Handle tool call iterations
-      while (response.stop_reason === 'tool_use') {
-        const toolUseBlock = response.content.find(c => c.type === 'tool_use') as Anthropic.ToolUseBlock;
-        if (!toolUseBlock) break;
+      for (let round = 0; round < MAX_TOOL_ROUNDS && response.functionCalls?.length; round++) {
+        // Send the model turn back unchanged so its thought signatures are preserved
+        const modelTurn = response.candidates?.[0]?.content;
+        if (modelTurn) contents.push(modelTurn);
 
-        toolsUsed.push(toolUseBlock.name);
-        const toolResult = await executeTool(toolUseBlock.name, toolUseBlock.input);
+        const responseParts = [];
+        for (const call of response.functionCalls) {
+          const name = call.name || '';
+          toolsUsed.push(name);
+          let result: any;
+          try {
+            result = await executeTool(name, call.args || {});
+          } catch (toolError: any) {
+            result = { error: toolError.message };
+          }
+          responseParts.push({ functionResponse: { id: call.id, name, response: { result } } });
+        }
+        contents.push({ role: 'user', parts: responseParts });
 
-        messages.push({
-          role: 'assistant',
-          content: response.content
-        });
-
-        messages.push({
-          role: 'user',
-          content: [
-            {
-              type: 'tool_result',
-              tool_use_id: toolUseBlock.id,
-              content: JSON.stringify(toolResult)
-            }
-          ]
-        });
-
-        response = await anthropic.messages.create({
-          model: claudeModel,
-          max_tokens: 1024,
-          system: buildSystemPrompt(),
-          tools: agentTools,
-          messages
-        });
+        response = await gemini.models.generateContent({ model: geminiModel, contents, config });
       }
 
-      const textBlock = response.content.find(c => c.type === 'text') as Anthropic.TextBlock;
-      const reply = textBlock ? textBlock.text : 'I have processed your request.';
+      const reply = response.text?.trim() || 'I have processed your request.';
       return { reply, toolsUsed };
     } catch (apiError: any) {
-      console.warn('[CLAUDE API ERROR] Falling back to intelligent engine:', apiError.message);
+      console.warn('[GEMINI API ERROR] Falling back to intelligent engine:', apiError.message);
     }
   }
 
@@ -365,7 +357,7 @@ async function executeIntelligentFallback(
     lower.includes('is this an ai')
   ) {
     return {
-      reply: `Hi! I am *Claude*, an autonomous AI assistant for *${defaultBusinessProfile.businessName}* operating on the official WhatsApp Cloud API. 🤖\n\nI can answer questions about our services, check live calendar availability, book appointments, and send reminders. How can I help you today?`,
+      reply: `Hi! I am an autonomous *AI assistant* for *${defaultBusinessProfile.businessName}* operating on the official WhatsApp Cloud API. 🤖\n\nI can answer questions about our services, check live calendar availability, book appointments, and send reminders. How can I help you today?`,
       toolsUsed: [],
       reasoningTrace: 'Answered AI identity inquiry with mandatory transparency disclosure.'
     };

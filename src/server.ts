@@ -1,13 +1,11 @@
 import express, { Request, Response } from 'express';
 import cors from 'cors';
 import http from 'http';
-import { WebSocketServer } from 'ws';
 import crypto from 'crypto';
 import dotenv from 'dotenv';
-import path from 'path';
 
 import { MetaWebhookPayload, WhatsAppInboundMessage } from './types/index.js';
-import { processWithClaude } from './agent/claude.js';
+import { processWithAgent, geminiModel } from './agent/gemini.js';
 import { whatsappClient } from './whatsapp/client.js';
 import { windowManager } from './whatsapp/windowManager.js';
 import { escalationManager } from './escalation/manager.js';
@@ -21,16 +19,11 @@ dotenv.config();
 
 const app = express();
 const server = http.createServer(app);
-const wss = new WebSocketServer({ server, path: '/ws' });
 
 const PORT = process.env.PORT || 3000;
 const VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN || 'claude_whatsapp_secret_verify_token_2026';
 const APP_SECRET = process.env.WHATSAPP_APP_SECRET || '';
-
-// Register WebSocket logger connection
-wss.on('connection', ws => {
-  webhookLogger.registerClient(ws);
-});
+const ADMIN_TOKEN = process.env.ADMIN_TOKEN || '';
 
 // Middleware
 app.use(cors());
@@ -39,6 +32,17 @@ app.use(express.json({
     req.rawBody = buf;
   }
 }));
+
+// Admin API requires "Authorization: Bearer <ADMIN_TOKEN>"; disabled when ADMIN_TOKEN is unset
+function requireAdmin(req: Request, res: Response, next: express.NextFunction) {
+  const header = req.headers.authorization || '';
+  const supplied = Buffer.from(header.replace(/^Bearer /, ''));
+  const expected = Buffer.from(ADMIN_TOKEN);
+  if (!ADMIN_TOKEN || supplied.length !== expected.length || !crypto.timingSafeEqual(supplied, expected)) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  next();
+}
 
 // Verify webhook signature if APP_SECRET is configured
 function verifySignature(req: any): boolean {
@@ -217,22 +221,23 @@ async function handleInboundMessage(msg: WhatsAppInboundMessage, contactName?: s
     return;
   }
 
-  // 6. Ask Claude what to say, with full business context & calendar tools
+  // 6. Ask the agent what to say, with full business context & calendar tools
   try {
     const thread = escalationManager.getThread(customerPhone);
-    const history = (thread?.messages || []).slice(-8).map(m => ({
+    // The current message was just added to the thread and is passed separately as incomingText
+    const history = (thread?.messages || []).slice(-9, -1).map(m => ({
       role: (m.from === 'customer' ? 'user' : 'assistant') as 'user' | 'assistant',
       content: m.text
     }));
 
-    const { reply, toolsUsed, reasoningTrace } = await processWithClaude({
+    const { reply, toolsUsed, reasoningTrace } = await processWithAgent({
       incomingText: userText,
       customerPhone,
       customerName,
       conversationHistory: history
     });
 
-    // 7. Send Claude's response back on your WhatsApp number
+    // 7. Send the agent's response back on your WhatsApp number
     const sendRes = await whatsappClient.sendText({
       to: customerPhone,
       body: reply
@@ -246,7 +251,7 @@ async function handleInboundMessage(msg: WhatsAppInboundMessage, contactName?: s
       durationMs,
       payload: msg,
       response: { reply, toolsUsed, sendResult: sendRes },
-      claudeReasoning: reasoningTrace,
+      agentReasoning: reasoningTrace,
       toolsUsed
     });
   } catch (err: any) {
@@ -287,8 +292,14 @@ app.post('/flow-endpoint', (req: Request, res: Response) => {
 });
 
 // -------------------------------------------------------------
-// Dashboard & Sandbox REST API Endpoints
+// Admin REST API Endpoints
 // -------------------------------------------------------------
+
+app.get('/', (_req: Request, res: Response) => {
+  res.json({ status: 'online', service: 'WhatsApp AI Agent' });
+});
+
+app.use('/api', requireAdmin);
 
 // System Status
 app.get('/api/status', (_req: Request, res: Response) => {
@@ -300,8 +311,8 @@ app.get('/api/status', (_req: Request, res: Response) => {
   res.json({
     status: 'online',
     whatsapp: clientStatus,
-    claudeModel: process.env.CLAUDE_MODEL || 'claude-3-5-sonnet-20241022',
-    hasAnthropicKey: Boolean(process.env.ANTHROPIC_API_KEY && process.env.ANTHROPIC_API_KEY.length > 10),
+    geminiModel,
+    hasGeminiKey: Boolean(process.env.GEMINI_API_KEY),
     activeConversationsCount: threads.length,
     openEscalationsCount: openEscalations,
     appointmentsCount: calendarEngine.getAllAppointments().length
@@ -455,7 +466,7 @@ app.get('/api/settings', (_req: Request, res: Response) => {
       wabaId: process.env.WHATSAPP_BUSINESS_ACCOUNT_ID || '',
       verifyToken: VERIFY_TOKEN,
       simulationMode: process.env.SIMULATION_MODE === 'true',
-      hasAnthropicKey: Boolean(process.env.ANTHROPIC_API_KEY)
+      hasGeminiKey: Boolean(process.env.GEMINI_API_KEY)
     }
   });
 });
@@ -495,38 +506,13 @@ app.post('/api/simulate-inbound', async (req: Request, res: Response) => {
   res.json({ success: true, messageId: simulatedMsgId });
 });
 
-// Serve frontend static build in production
-const clientDistPath = path.resolve(process.cwd(), 'client', 'dist');
-app.use(express.static(clientDistPath));
-app.get('*', (req: Request, res: Response) => {
-  if (req.path.startsWith('/api') || req.path.startsWith('/webhook') || req.path.startsWith('/flow-endpoint')) {
-    return res.status(404).json({ error: 'Endpoint not found' });
-  }
-  const indexPath = path.join(clientDistPath, 'index.html');
-  res.sendFile(indexPath, err => {
-    if (err) {
-      res.status(200).send(`
-        <!DOCTYPE html>
-        <html>
-          <head><title>Claude WhatsApp Agent API</title><meta charset="utf-8"/></head>
-          <body style="font-family:sans-serif;padding:40px;background:#0d1117;color:#c9d1d9;">
-            <h2>🤖 Claude WhatsApp Agent Server Running</h2>
-            <p>API Server is listening on port ${PORT}.</p>
-            <p>To view the full Builder Dashboard, run <code>npm run client</code> or build with <code>npm run build:client</code>.</p>
-          </body>
-        </html>
-      `);
-    }
-  });
-});
-
 // Start scheduler and server
 server.listen(PORT, () => {
   console.log(`\n======================================================`);
-  console.log(`🚀 Claude WhatsApp Agent Server listening on port ${PORT}`);
+  console.log(`🚀 WhatsApp AI Agent Server listening on port ${PORT}`);
   console.log(`📡 Webhook URL: http://localhost:${PORT}/webhook`);
-  console.log(`🔑 Verify Token: ${VERIFY_TOKEN}`);
-  console.log(`🤖 Claude Model: ${process.env.CLAUDE_MODEL || 'claude-3-5-sonnet-20241022'}`);
+    console.log(`🤖 Gemini Model: ${geminiModel}`);
+  if (!ADMIN_TOKEN) console.log('🔒 Admin API disabled (set ADMIN_TOKEN to enable)');
   console.log(`======================================================\n`);
 
   reminderScheduler.start();

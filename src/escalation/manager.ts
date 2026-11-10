@@ -1,7 +1,6 @@
 import fs from 'fs';
 import path from 'path';
 import { ConversationThread, EscalationTicket, ChatMessage } from '../types/index.js';
-import { webhookLogger } from '../logger/webhookLogger.js';
 
 const DATA_DIR = path.resolve(process.cwd(), 'data');
 const THREADS_FILE = path.join(DATA_DIR, 'threads.json');
@@ -100,10 +99,6 @@ export class EscalationManager {
     }
     this.save();
 
-    webhookLogger.broadcast({
-      type: 'THREAD_MESSAGE',
-      data: { phone, message: fullMsg, thread }
-    });
 
     return fullMsg;
   }
@@ -116,10 +111,6 @@ export class EscalationManager {
       if (msg) {
         msg.status = status;
         this.save();
-        webhookLogger.broadcast({
-          type: 'MESSAGE_STATUS_UPDATE',
-          data: { phone, messageId, status }
-        });
       }
     }
   }
@@ -157,10 +148,6 @@ export class EscalationManager {
       status: 'read'
     });
 
-    webhookLogger.broadcast({
-      type: 'ESCALATION_CREATED',
-      data: { ticket, thread }
-    });
 
     console.log(`[ESCALATION] Phone: ${params.customerPhone} | Reason: ${params.reason} | Urgency: ${ticket.urgency}`);
     return ticket;
@@ -180,10 +167,6 @@ export class EscalationManager {
       text: `👤 Human Agent (${operatorName}) took over the conversation. Automated responses paused.`
     });
 
-    webhookLogger.broadcast({
-      type: 'HUMAN_TAKEOVER',
-      data: { phone, operatorName, thread }
-    });
 
     return true;
   }
@@ -208,13 +191,9 @@ export class EscalationManager {
 
     this.addMessageToThread(phone, {
       from: 'system',
-      text: `🤖 Claude AI automation resumed for this conversation.`
+      text: `🤖 AI automation resumed for this conversation.`
     });
 
-    webhookLogger.broadcast({
-      type: 'BOT_RESUMED',
-      data: { phone, thread }
-    });
 
     return true;
   }

@@ -1,5 +1,5 @@
 # 📋 Complete Setup & Deployment Guide
-## "Give Claude a WhatsApp Number" — Step-by-Step
+## "Give Your AI Agent a WhatsApp Number" — Step-by-Step
 
 ---
 
@@ -19,7 +19,7 @@ As detailed in the guide by [@aiwithanushka](https://twitter.com/aiwithanushka),
 ### Step 2: Configure Meta WhatsApp Cloud API
 
 1. Visit [Meta for Developers](https://developers.facebook.com/) and register or log in.
-2. Click **Create App** &rarr; Select **Other** &rarr; Select **Business** &rarr; Name your app (e.g. `Claude WhatsApp Agent`).
+2. Click **Create App** &rarr; Select **Other** &rarr; Select **Business** &rarr; Name your app (e.g. `WhatsApp AI Agent`).
 3. Under **Add products to your app**, locate **WhatsApp** and click **Set up**.
 4. In the left navigation, go to **WhatsApp &rarr; API Setup**:
    - Note your **Phone number ID**.
@@ -45,23 +45,25 @@ Meta delivers all inbound customer messages and delivery receipts via webhook HT
 3. In Meta App Dashboard, navigate to **WhatsApp &rarr; Configuration &rarr; Webhook**:
    - Click **Edit**.
    - **Callback URL**: `https://xyz123.ngrok-free.app/webhook`
-   - **Verify Token**: `claude_whatsapp_secret_verify_token_2026` (or the token specified in `.env`)
+   - **Verify Token**: the value of `WHATSAPP_VERIFY_TOKEN` in your environment
    - Click **Verify and Save**.
 4. Under **Webhook fields**, click **Manage** and subscribe to:
    - `messages` (delivers incoming texts, button clicks, flow completions, and delivery statuses).
 
 ---
 
-### Step 4: Add Claude API Key
+### Step 4: Add a Gemini API Key
 
-1. Go to [Anthropic Console](https://console.anthropic.com/) and generate an API key.
-2. In your `.env` file (or via the **Config & Keys** tab in the dashboard), set:
+1. Go to [Google AI Studio](https://aistudio.google.com/apikey) and create an API key (the free tier needs no card).
+2. In your `.env` file (or your host's environment variables), set:
    ```env
-   ANTHROPIC_API_KEY=sk-ant-api03-...
-   CLAUDE_MODEL=claude-3-5-sonnet-20241022
+   GEMINI_API_KEY=...
+   GEMINI_MODEL=gemini-3.5-flash-lite
    SIMULATION_MODE=false
    ```
-3. When `SIMULATION_MODE=false`, the server automatically calls Claude 3.5 Sonnet directly with the agentic tool calling loop for real conversations!
+3. `GEMINI_API_KEY` switches replies from the scripted fallback to Gemini with the tool-calling loop. `SIMULATION_MODE=false` makes replies go out over the real WhatsApp Cloud API.
+
+> Free-tier limits are per Google project and change often; check them on the rate-limit page in AI Studio. On the free tier Google may use prompts and replies to improve its products.
 
 ---
 
@@ -99,7 +101,7 @@ Outside the 24-hour customer service window, only pre-approved WhatsApp template
 ### Step 7: Launch & Debugging Checklist
 
 Before opening your number to real customers:
-- [x] Tested inbound text and verified Claude replies in < 2 seconds.
+- [x] Tested inbound text and verified agent replies in < 2 seconds.
 - [x] Verified calendar availability check and booking conflict prevention.
 - [x] Verified human escalation pauses bot replies and logs urgent ticket.
 - [x] Verified morning-of reminder cron scheduler triggers at 8:00 AM.

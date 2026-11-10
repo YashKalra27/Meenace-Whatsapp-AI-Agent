@@ -2,7 +2,7 @@ import { calendarEngine } from '../src/calendar/engine.js';
 import { windowManager } from '../src/whatsapp/windowManager.js';
 import { escalationManager } from '../src/escalation/manager.js';
 import { handleFlowDataExchange } from '../src/flows/bookingFlow.js';
-import { processWithClaude } from '../src/agent/claude.js';
+import { processWithAgent } from '../src/agent/gemini.js';
 import { reminderScheduler } from '../src/calendar/scheduler.js';
 
 let passed = 0;
@@ -125,34 +125,34 @@ async function runTests() {
   assert(escalationManager.isHumanMode(testPhone) === false, 'Bot active mode restored');
 
   // -------------------------------------------------------------------------
-  // Test 5: Claude Agent Reasoning Loop & Tool Invocation
+  // Test 5: AI Agent Reasoning Loop & Tool Invocation
   // -------------------------------------------------------------------------
-  console.log('\n📋 Suite 5: Claude Agent Reasoning & Tool Execution');
+  console.log('\n📋 Suite 5: AI Agent Reasoning & Tool Execution');
 
   // Identity transparency
-  const identityRes = await processWithClaude({
+  const identityRes = await processWithAgent({
     incomingText: 'Are you an AI or a real human?',
     customerPhone: testPhone,
     customerName: testCustomer
   });
-  assert(identityRes.reply.toLowerCase().includes('claude') || identityRes.reply.toLowerCase().includes('ai assistant'), 'Agent truthfully acknowledges it is an AI assistant');
+  assert(identityRes.reply.toLowerCase().includes('ai assistant') || identityRes.reply.toLowerCase().includes('ai assistant'), 'Agent truthfully acknowledges it is an AI assistant');
 
   // Services Catalog
-  const servicesRes = await processWithClaude({
+  const servicesRes = await processWithAgent({
     incomingText: 'What services do you offer and what is your pricing?',
     customerPhone: testPhone,
     customerName: testCustomer
   });
-  assert(servicesRes.toolsUsed.includes('get_services_catalog'), 'Claude invokes get_services_catalog tool');
-  assert(servicesRes.reply.includes('Strategy') || servicesRes.reply.includes('$'), 'Claude reply contains pricing information');
+  assert(servicesRes.toolsUsed.includes('get_services_catalog'), 'Agent invokes get_services_catalog tool');
+  assert(servicesRes.reply.includes('Strategy') || servicesRes.reply.includes('$'), 'Agent reply contains pricing information');
 
   // Escalation request
-  const escalateMsgRes = await processWithClaude({
+  const escalateMsgRes = await processWithAgent({
     incomingText: 'I demand to speak with a human manager right away!',
     customerPhone: testPhone,
     customerName: testCustomer
   });
-  assert(escalateMsgRes.toolsUsed.includes('escalate_to_human'), 'Claude invokes escalate_to_human tool when user requests human');
+  assert(escalateMsgRes.toolsUsed.includes('escalate_to_human'), 'Agent invokes escalate_to_human tool when user requests human');
   assert(escalateMsgRes.reply.toLowerCase().includes('escalat'), 'Reply confirms escalation to human');
 
   // -------------------------------------------------------------------------
