@@ -1,4 +1,4 @@
-import { GoogleGenAI, Content, FunctionDeclaration } from '@google/genai';
+import { GoogleGenAI, ApiError, Content, FunctionDeclaration } from '@google/genai';
 import dotenv from 'dotenv';
 import { servicesCatalog, defaultBusinessProfile } from '../config/businessData.js';
 import { calendarEngine } from '../calendar/engine.js';
@@ -12,8 +12,11 @@ const geminiApiKey = process.env.GEMINI_API_KEY || '';
 export const geminiModel = process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite';
 const gemini = geminiApiKey ? new GoogleGenAI({ apiKey: geminiApiKey }) : null;
 
-// Each tool round trip is one request against the free-tier daily quota
+// Guards against a model stuck calling tools in a loop; normal replies need one or two rounds
 const MAX_TOOL_ROUNDS = 5;
+
+const QUOTA_EXHAUSTED_REPLY = "Sorry, I've used up my AI quota for now, so I can't answer properly at the moment. 🙏 Please try again a little later and I'll be right here!";
+const AGENT_UNAVAILABLE_REPLY = "Sorry, I'm having trouble thinking right now. 🙏 Please send your message again in a minute.";
 
 export const agentTools: FunctionDeclaration[] = [
   {
@@ -327,11 +330,17 @@ export async function processWithAgent(params: {
       const reply = response.text?.trim() || 'I have processed your request.';
       return { reply, toolsUsed };
     } catch (apiError: any) {
-      console.warn('[GEMINI API ERROR] Falling back to intelligent engine:', apiError.message);
+      console.warn('[GEMINI API ERROR]', apiError.message);
+      const quotaExhausted = apiError instanceof ApiError && apiError.status === 429;
+      return {
+        reply: quotaExhausted ? QUOTA_EXHAUSTED_REPLY : AGENT_UNAVAILABLE_REPLY,
+        toolsUsed,
+        reasoningTrace: `Gemini API error: ${apiError.message}`
+      };
     }
   }
 
-  // Fallback / Sandbox Intelligent Reasoner
+  // Sandbox reasoner, used only when no GEMINI_API_KEY is configured
   return executeIntelligentFallback(incomingText, customerPhone, customerName);
 }
 

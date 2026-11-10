@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { WebhookLog } from '../types/index.js';
 
-const DATA_DIR = path.resolve(process.cwd(), 'data');
+const DATA_DIR = path.resolve(process.env.DATA_DIR || path.join(process.cwd(), 'data'));
 const LOGS_FILE = path.join(DATA_DIR, 'webhook_logs.json');
 const MAX_LOGS = 500;
 

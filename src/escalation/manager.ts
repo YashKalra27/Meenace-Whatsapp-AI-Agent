@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { ConversationThread, EscalationTicket, ChatMessage } from '../types/index.js';
 
-const DATA_DIR = path.resolve(process.cwd(), 'data');
+const DATA_DIR = path.resolve(process.env.DATA_DIR || path.join(process.cwd(), 'data'));
 const THREADS_FILE = path.join(DATA_DIR, 'threads.json');
 const TICKETS_FILE = path.join(DATA_DIR, 'escalation_tickets.json');
 

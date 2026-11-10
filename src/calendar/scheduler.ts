@@ -74,6 +74,8 @@ export class ReminderScheduler {
           response: { status: 'reminder_dispatched', time: new Date().toISOString() }
         });
       } catch (err: any) {
+        // Mark it anyway so a missing or unapproved template is not retried every minute
+        calendarEngine.markReminderSent(apt.id);
         console.error(`[SCHEDULER] Error sending reminder for ${apt.id}:`, err);
       }
     }

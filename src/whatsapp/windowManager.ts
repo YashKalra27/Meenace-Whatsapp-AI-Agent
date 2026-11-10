@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { CustomerWindowStatus } from '../types/index.js';
 
-const DATA_DIR = path.resolve(process.cwd(), 'data');
+const DATA_DIR = path.resolve(process.env.DATA_DIR || path.join(process.cwd(), 'data'));
 const WINDOWS_FILE = path.join(DATA_DIR, 'windows.json');
 const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
 

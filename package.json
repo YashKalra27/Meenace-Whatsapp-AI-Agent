@@ -8,7 +8,7 @@
     "build": "tsc",
     "start": "tsx src/server.ts",
     "typecheck": "tsc --noEmit",
-    "test": "tsx test/runAllTests.ts"
+    "test": "DATA_DIR=$(mktemp -d) GEMINI_API_KEY= SIMULATION_MODE=true tsx test/runAllTests.ts"
   },
   "dependencies": {
     "@google/genai": "^3.0.0",

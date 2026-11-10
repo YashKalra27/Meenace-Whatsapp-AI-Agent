@@ -3,7 +3,7 @@ import path from 'path';
 import { Appointment, ServiceItem } from '../types/index.js';
 import { servicesCatalog, defaultBusinessProfile } from '../config/businessData.js';
 
-const DATA_DIR = path.resolve(process.cwd(), 'data');
+const DATA_DIR = path.resolve(process.env.DATA_DIR || path.join(process.cwd(), 'data'));
 const APPOINTMENTS_FILE = path.join(DATA_DIR, 'appointments.json');
 
 export class CalendarEngine {
@@ -22,42 +22,6 @@ export class CalendarEngine {
       if (fs.existsSync(APPOINTMENTS_FILE)) {
         const raw = fs.readFileSync(APPOINTMENTS_FILE, 'utf-8');
         this.appointments = JSON.parse(raw);
-      } else {
-        // Seed with sample initial appointments
-        const today = new Date().toISOString().split('T')[0];
-        const tomorrow = new Date(Date.now() + 86400000).toISOString().split('T')[0];
-
-        this.appointments = [
-          {
-            id: 'apt-101',
-            customerName: 'Sarah Jenkins',
-            customerPhone: '+14155550192',
-            serviceId: 'srv-strategy',
-            serviceName: 'AI Automation Strategy Session',
-            date: today,
-            timeSlot: '11:00 AM',
-            status: 'confirmed',
-            createdAt: Date.now() - 86400000,
-            updatedAt: Date.now() - 86400000,
-            notes: 'Looking to automate lead intake on WhatsApp for real estate agency.',
-            reminderSent: false
-          },
-          {
-            id: 'apt-102',
-            customerName: 'David Chen',
-            customerPhone: '+14155550188',
-            serviceId: 'srv-whatsapp-bot',
-            serviceName: 'Custom WhatsApp AI Agent Implementation',
-            date: tomorrow,
-            timeSlot: '02:00 PM',
-            status: 'confirmed',
-            createdAt: Date.now() - 43200000,
-            updatedAt: Date.now() - 43200000,
-            notes: 'E-commerce store support bot integration.',
-            reminderSent: false
-          }
-        ];
-        this.save();
       }
     } catch (err) {
       console.error('Failed to load appointments storage, starting in-memory:', err);

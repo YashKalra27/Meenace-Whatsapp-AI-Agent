@@ -170,6 +170,7 @@ async function runTests() {
     notes: 'Testing morning reminder cron'
   });
 
+  assert(Boolean(aptToday.appointment), 'Booked an appointment for today');
   if (aptToday.appointment) {
     const dueBefore = calendarEngine.getDueMorningReminders();
     assert(dueBefore.some(a => a.id === aptToday.appointment?.id), 'Scheduler detects appointment scheduled for today');

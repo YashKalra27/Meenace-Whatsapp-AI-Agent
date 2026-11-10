@@ -208,7 +208,14 @@ async function handleInboundMessage(msg: WhatsAppInboundMessage, contactName?: s
     metadata: { whatsappMessageId: msg.id }
   });
 
-  // 5. Check Human Escalation Mode: If human operator took over, bot stops replying
+  // 5. Check Human Escalation Mode: If human operator took over, bot stops replying.
+  // Sending "/resume" from WhatsApp hands the chat back to the bot.
+  if (escalationManager.isHumanMode(customerPhone) && userText.trim().toLowerCase() === '/resume') {
+    escalationManager.resumeBot(customerPhone);
+    await whatsappClient.sendText({ to: customerPhone, body: '🤖 The AI assistant is back. How can I help?' });
+    return;
+  }
+
   if (escalationManager.isHumanMode(customerPhone)) {
     webhookLogger.log({
       direction: 'inbound',
