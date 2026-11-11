@@ -1,200 +1,148 @@
-import { calendarEngine } from '../src/calendar/engine.js';
-import { windowManager } from '../src/whatsapp/windowManager.js';
-import { escalationManager } from '../src/escalation/manager.js';
-import { handleFlowDataExchange } from '../src/flows/bookingFlow.js';
-import { processWithAgent } from '../src/agent/gemini.js';
-import { reminderScheduler } from '../src/calendar/scheduler.js';
+import http from 'http';
+import { AddressInfo } from 'net';
+
+// Configure before the modules load: they read the environment at import time
+const OWNER = '919800000001';
+process.env.NODE_ENV = 'test';
+process.env.OWNER_PHONE = `+${OWNER}`;
+process.env.SIMULATION_MODE = 'true';
+process.env.GEMINI_API_KEY = '';
+delete process.env.KALVION_URL;
+delete process.env.KALVION_API_TOKEN;
+
+const { windowManager } = await import('../src/whatsapp/windowManager.js');
+const { splitForWhatsApp } = await import('../src/whatsapp/client.js');
+const { conversationStore } = await import('../src/conversation/store.js');
+const { agentTools, executeTool } = await import('../src/tools/index.js');
+const { kalvionGet } = await import('../src/tools/kalvion.js');
+const { istNow } = await import('../src/tools/core.js');
+const { processWithAgent, NOT_CONFIGURED_REPLY } = await import('../src/agent/gemini.js');
+const { handleInboundMessage } = await import('../src/server.js');
+const { webhookLogger } = await import('../src/logger/webhookLogger.js');
 
 let passed = 0;
 let failed = 0;
 
 function assert(condition: boolean, testName: string, extra = '') {
   if (condition) {
-    console.log(`  ✅ PASS: ${testName}`);
     passed++;
+    console.log(`  ✅ PASS: ${testName}`);
   } else {
-    console.error(`  ❌ FAIL: ${testName} ${extra}`);
     failed++;
+    console.error(`  ❌ FAIL: ${testName} ${extra}`);
   }
 }
 
-async function runTests() {
-  console.log('\n======================================================');
-  console.log('🧪 RUNNING CLAUDE WHATSAPP AGENT TEST SUITE');
-  console.log('======================================================\n');
+// -------------------------------------------------------------------------
+console.log('\n📋 Suite 1: 24-Hour Meta Service Window');
+windowManager.recordCustomerInbound(OWNER);
+const window = windowManager.getWindowStatus(OWNER);
+assert(window.isOpen, 'Inbound message opens the 24h window');
+assert(window.remainingMinutes > 1430, 'Window lasts about 24 hours');
 
-  const testPhone = '+14155559999';
-  const testCustomer = 'Testing User';
-  const tomorrow = new Date(Date.now() + 86400000).toISOString().split('T')[0];
+// -------------------------------------------------------------------------
+console.log('\n📋 Suite 2: Conversation Store');
+conversationStore.append(OWNER, 'user', 'first');
+conversationStore.append(OWNER, 'assistant', 'second');
+assert(conversationStore.recent(`+${OWNER}`, 10).length === 2, 'History is keyed by digits, whatever the formatting');
+assert(conversationStore.recent(OWNER, 1)[0].text === 'second', 'recent() returns the latest messages');
+for (let i = 0; i < 60; i++) conversationStore.append(OWNER, 'user', `m${i}`);
+assert(conversationStore.recent(OWNER, 100).length === 50, 'History is capped at 50 messages');
+conversationStore.clear(OWNER);
+assert(conversationStore.recent(OWNER, 10).length === 0, 'clear() forgets the conversation');
 
-  // -------------------------------------------------------------------------
-  // Test 1: 24-Hour Customer Care Window Manager
-  // -------------------------------------------------------------------------
-  console.log('📋 Suite 1: 24-Hour Meta Service Window Policy');
-  windowManager.recordCustomerInbound(testPhone);
-  const winStatus = windowManager.getWindowStatus(testPhone);
-  assert(winStatus.isOpen === true, 'Inbound message successfully opens 24h window');
-  assert(winStatus.remainingMinutes > 1400, 'Remaining window is ~24 hours (1440 mins)');
-  assert(windowManager.isFreeformAllowed(testPhone) === true, 'Freeform WhatsApp messaging is allowed inside 24h window');
+// -------------------------------------------------------------------------
+console.log('\n📋 Suite 3: WhatsApp Message Splitting');
+assert(splitForWhatsApp('short').length === 1, 'Short text stays one message');
+const long = Array.from({ length: 300 }, (_, i) => `Line ${i} with some text to fill it out`).join('\n');
+const chunks = splitForWhatsApp(long);
+assert(chunks.length > 1 && chunks.every(c => c.length <= 4096), `Long text splits under 4096 chars (${chunks.length} parts)`);
+assert(chunks.join('\n') === long, 'Splitting on line breaks loses nothing');
 
-  // -------------------------------------------------------------------------
-  // Test 2: Calendar Engine & Booking Conflict Prevention
-  // -------------------------------------------------------------------------
-  console.log('\n📋 Suite 2: Calendar Engine & Conflict Prevention');
-  const slots = calendarEngine.getAvailableSlots(tomorrow);
-  assert(slots.slots.length > 0, `Available slots found for tomorrow (${tomorrow}): ${slots.slots.length} slots`);
+// -------------------------------------------------------------------------
+console.log('\n📋 Suite 4: Tool Registry & IST Clock');
+const names = agentTools.map(t => t.declaration.name || '');
+assert(new Set(names).size === names.length, `Tool names are unique (${names.length} tools)`);
+assert(names.every(n => /^[a-z0-9_]+$/.test(n)), 'Tool names are snake_case');
+const unknown: any = await executeTool('no_such_tool', {});
+assert(typeof unknown?.error === 'string', 'Unknown tool returns an error instead of throwing');
+const wedMorning = istNow(new Date('2026-11-11T05:00:00Z'));
+assert(wedMorning.time === '10:30' && wedMorning.weekday === 'Wednesday', 'UTC converts to IST');
+assert(wedMorning.nseRegularSessionOpen, 'Session open at 10:30 IST on a weekday');
+assert(!istNow(new Date('2026-11-14T05:00:00Z')).nseRegularSessionOpen, 'Session closed on Saturday');
+assert(!istNow(new Date('2026-11-11T10:05:00Z')).nseRegularSessionOpen, 'Session closed after 15:30 IST');
 
-  const chosenSlot = slots.slots[0];
-  const booking = calendarEngine.bookAppointment({
-    customerName: testCustomer,
-    customerPhone: testPhone,
-    serviceId: 'srv-strategy',
-    date: tomorrow,
-    timeSlot: chosenSlot,
-    notes: 'Unit test automated booking'
-  });
+// -------------------------------------------------------------------------
+console.log('\n📋 Suite 5: Kalvion Client');
+const notConnected: any = await kalvionGet('/api/market/indices');
+assert(/not connected/.test(notConnected?.error || ''), 'Clear error when Kalvion is not configured');
 
-  assert(booking.success === true && Boolean(booking.appointment), `Booked appointment successfully: ${booking.appointment?.id}`);
-  assert(booking.appointment?.status === 'confirmed', 'Appointment status is confirmed');
-
-  // Attempt to book same slot (Conflict Prevention)
-  const doubleBooking = calendarEngine.bookAppointment({
-    customerName: 'Duplicate Customer',
-    customerPhone: '+14155558888',
-    serviceId: 'srv-strategy',
-    date: tomorrow,
-    timeSlot: chosenSlot
-  });
-  assert(doubleBooking.success === false, 'Conflict prevention blocked double booking on same slot');
-
-  // Reschedule
-  const anotherSlot = slots.slots[1];
-  if (anotherSlot && booking.appointment) {
-    const rescheduled = calendarEngine.rescheduleAppointment(booking.appointment.id, tomorrow, anotherSlot);
-    assert(rescheduled.success === true, `Rescheduled appointment to ${anotherSlot}`);
-    assert(rescheduled.appointment?.status === 'rescheduled', 'Status updated to rescheduled');
+const seen: Array<{ url: string; auth?: string }> = [];
+const fakeKalvion = http.createServer((req, res) => {
+  seen.push({ url: req.url || '', auth: req.headers.authorization });
+  if (req.url?.startsWith('/api/account/positions')) {
+    res.writeHead(503, { 'Content-Type': 'application/json' });
+    return res.end('{"detail":"Upstox token expired"}');
   }
-
-  // Cancel
-  if (booking.appointment) {
-    const cancelled = calendarEngine.cancelAppointment(booking.appointment.id, 'Test cancellation');
-    assert(cancelled.success === true, `Cancelled appointment ${booking.appointment.id}`);
-    assert(cancelled.appointment?.status === 'cancelled', 'Status updated to cancelled');
+  if (req.url?.startsWith('/api/ipo/list')) {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify({ ipos: 'x'.repeat(20000) }));
   }
-
-  // -------------------------------------------------------------------------
-  // Test 3: WhatsApp Flows Data Exchange
-  // -------------------------------------------------------------------------
-  console.log('\n📋 Suite 3: WhatsApp Flows In-Chat Form Protocol');
-  const pingRes = handleFlowDataExchange({ version: '3.1', action: 'ping' }, testPhone);
-  assert(pingRes.data?.status === 'active', 'Flow ping returns active status');
-
-  const initRes = handleFlowDataExchange({ version: '3.1', action: 'INIT' }, testPhone);
-  assert(initRes.screen === 'SERVICE_SELECTION', 'Flow INIT returns SERVICE_SELECTION screen');
-  assert(initRes.data?.services?.length > 0, 'Flow INIT provides services catalog options');
-
-  const exchangeRes = handleFlowDataExchange({
-    version: '3.1',
-    action: 'data_exchange',
-    screen: 'SERVICE_SELECTION',
-    data: { selected_date: tomorrow }
-  }, testPhone);
-  assert(exchangeRes.screen === 'DATE_TIME', 'Flow data_exchange navigates to DATE_TIME screen');
-  assert(exchangeRes.data?.available_slots?.length > 0, 'Flow dynamic slots populated from calendar engine');
-
-  // -------------------------------------------------------------------------
-  // Test 4: Human Escalation & Takeover State Machine
-  // -------------------------------------------------------------------------
-  console.log('\n📋 Suite 4: Human Escalation & Takeover State Machine');
-  const ticket = escalationManager.escalate({
-    customerPhone: testPhone,
-    customerName: testCustomer,
-    reason: 'Customer requested human supervisor in test',
-    urgency: 'high',
-    summary: 'Testing human handover'
-  });
-  assert(ticket.status === 'open', `Created escalation ticket ${ticket.id}`);
-  assert(escalationManager.isHumanMode(testPhone) === true, 'Conversation switched to human_takeover mode');
-
-  const thread = escalationManager.getThread(testPhone);
-  assert(thread?.escalated === true, 'Thread is marked escalated');
-
-  // Resume Bot
-  const resumed = escalationManager.resumeBot(testPhone);
-  assert(resumed === true, 'Resumed bot automation');
-  assert(escalationManager.isHumanMode(testPhone) === false, 'Bot active mode restored');
-
-  // -------------------------------------------------------------------------
-  // Test 5: AI Agent Reasoning Loop & Tool Invocation
-  // -------------------------------------------------------------------------
-  console.log('\n📋 Suite 5: AI Agent Reasoning & Tool Execution');
-
-  // Identity transparency
-  const identityRes = await processWithAgent({
-    incomingText: 'Are you an AI or a real human?',
-    customerPhone: testPhone,
-    customerName: testCustomer
-  });
-  assert(identityRes.reply.toLowerCase().includes('ai assistant') || identityRes.reply.toLowerCase().includes('ai assistant'), 'Agent truthfully acknowledges it is an AI assistant');
-
-  // Services Catalog
-  const servicesRes = await processWithAgent({
-    incomingText: 'What services do you offer and what is your pricing?',
-    customerPhone: testPhone,
-    customerName: testCustomer
-  });
-  assert(servicesRes.toolsUsed.includes('get_services_catalog'), 'Agent invokes get_services_catalog tool');
-  assert(servicesRes.reply.includes('Strategy') || servicesRes.reply.includes('$'), 'Agent reply contains pricing information');
-
-  // Escalation request
-  const escalateMsgRes = await processWithAgent({
-    incomingText: 'I demand to speak with a human manager right away!',
-    customerPhone: testPhone,
-    customerName: testCustomer
-  });
-  assert(escalateMsgRes.toolsUsed.includes('escalate_to_human'), 'Agent invokes escalate_to_human tool when user requests human');
-  assert(escalateMsgRes.reply.toLowerCase().includes('escalat'), 'Reply confirms escalation to human');
-
-  // -------------------------------------------------------------------------
-  // Test 6: Morning Reminder Scheduler
-  // -------------------------------------------------------------------------
-  console.log('\n📋 Suite 6: Morning-Of Reminder Scheduler');
-  // Create an appointment for today
-  const today = new Date().toISOString().split('T')[0];
-  const aptToday = calendarEngine.bookAppointment({
-    customerName: 'Reminder Test User',
-    customerPhone: testPhone,
-    serviceId: 'srv-strategy',
-    date: today,
-    timeSlot: '03:00 PM',
-    notes: 'Testing morning reminder cron'
-  });
-
-  assert(Boolean(aptToday.appointment), 'Booked an appointment for today');
-  if (aptToday.appointment) {
-    const dueBefore = calendarEngine.getDueMorningReminders();
-    assert(dueBefore.some(a => a.id === aptToday.appointment?.id), 'Scheduler detects appointment scheduled for today');
-
-    const reminderRun = await reminderScheduler.checkAndSendReminders();
-    assert(reminderRun.sentCount > 0, `Dispatched morning reminder template: ${reminderRun.sentCount} sent`);
-
-    const dueAfter = calendarEngine.getDueMorningReminders();
-    assert(!dueAfter.some(a => a.id === aptToday.appointment?.id), 'Appointment marked reminderSent and removed from due queue');
-  }
-
-  // -------------------------------------------------------------------------
-  // Final Results
-  // -------------------------------------------------------------------------
-  console.log('\n======================================================');
-  console.log(`🏁 TEST RESULTS: ${passed} PASSED | ${failed} FAILED`);
-  console.log('======================================================\n');
-
-  if (failed > 0) {
-    process.exit(1);
-  }
-}
-
-runTests().catch(err => {
-  console.error('Fatal test error:', err);
-  process.exit(1);
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify([{ name: 'NIFTY 50', ltp: 25000 }]));
 });
+await new Promise<void>(resolve => fakeKalvion.listen(0, '127.0.0.1', resolve));
+process.env.KALVION_URL = `http://127.0.0.1:${(fakeKalvion.address() as AddressInfo).port}/`;
+process.env.KALVION_API_TOKEN = 'test-token';
+
+const indices: any = await executeTool('kalvion_market_indices', {});
+assert(indices?.[0]?.ltp === 25000, 'Tool returns Kalvion JSON');
+assert(seen[0]?.auth === 'Bearer test-token', 'Sends KALVION_API_TOKEN as a bearer');
+await executeTool('kalvion_search_instruments', { query: 'HDFC Bank' });
+assert(seen[1]?.url === '/api/instruments/search?q=HDFC+Bank&limit=10', 'Builds query parameters', seen[1]?.url);
+await executeTool('kalvion_bots', { host: 'ec2/mumbai' });
+assert(seen[2]?.url === '/api/remote/ec2%2Fmumbai/bots', 'Encodes the host name in the path', seen[2]?.url);
+const failedCall: any = await executeTool('kalvion_positions', {});
+assert(/HTTP 503/.test(failedCall?.error || '') && /expired/.test(failedCall?.detail || ''), 'HTTP errors come back with Kalvion\'s detail');
+const big: any = await executeTool('kalvion_ipo_list', {});
+assert(big?.truncated === true && big.data.length === 12000, 'Large replies are truncated for the model');
+fakeKalvion.close();
+delete process.env.KALVION_URL;
+delete process.env.KALVION_API_TOKEN;
+
+// -------------------------------------------------------------------------
+console.log('\n📋 Suite 6: Agent Without a Gemini Key');
+const noKey = await processWithAgent({ incomingText: 'hi', ownerName: 'Yash' });
+assert(noKey.reply === NOT_CONFIGURED_REPLY, 'Says Gemini is not configured instead of guessing');
+
+// -------------------------------------------------------------------------
+console.log('\n📋 Suite 7: Owner-Only Webhook Handling');
+const inbound = (from: string, body: string) => ({ from, id: `wamid.${Math.random()}`, timestamp: '1', type: 'text', text: { body } });
+
+webhookLogger.clearLogs();
+await handleInboundMessage(inbound('919811111111', 'show my positions'));
+let logs = webhookLogger.getLogs(10);
+assert(logs.length === 1 && logs[0].type === 'ignored', 'A stranger is ignored');
+assert(!logs.some(l => l.direction === 'outbound'), 'Nothing is sent to a stranger');
+
+webhookLogger.clearLogs();
+await handleInboundMessage(inbound(OWNER, 'hello'));
+logs = webhookLogger.getLogs(10);
+const sent = logs.find(l => l.direction === 'outbound');
+assert(sent?.payload?.to === OWNER, 'The owner gets a reply');
+assert(conversationStore.recent(OWNER, 10).length === 2, 'The exchange is saved to history');
+
+await handleInboundMessage(inbound(OWNER, '/new'));
+assert(conversationStore.recent(OWNER, 10).length === 0, '/new clears the history');
+
+webhookLogger.clearLogs();
+await handleInboundMessage(inbound(OWNER, '/help'));
+logs = webhookLogger.getLogs(10);
+assert(/\/new/.test(logs.find(l => l.direction === 'outbound')?.payload?.text?.body || ''), '/help lists the commands');
+
+// -------------------------------------------------------------------------
+console.log('\n======================================================');
+console.log(`🏁 TEST RESULTS: ${passed} PASSED | ${failed} FAILED`);
+console.log('======================================================\n');
+
+process.exit(failed > 0 ? 1 : 0);

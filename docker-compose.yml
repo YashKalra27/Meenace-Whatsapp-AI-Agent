@@ -1,14 +1,13 @@
 services:
-  whatsapp-ai-agent:
+  meenace:
     build: .
-    container_name: whatsapp-ai-agent
+    container_name: meenace
     ports:
       - "3000:3000"
+    env_file: .env
     environment:
       - PORT=3000
       - NODE_ENV=production
-      - WHATSAPP_VERIFY_TOKEN=claude_whatsapp_secret_verify_token_2026
-      - SIMULATION_MODE=true
     volumes:
       - ./data:/app/data
     restart: unless-stopped

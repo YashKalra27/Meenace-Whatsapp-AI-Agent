@@ -1,14 +1,15 @@
 {
-  "name": "claude-whatsapp-agent",
+  "name": "meenace",
   "version": "1.0.0",
-  "description": "Autonomous WhatsApp AI Assistant powered by Gemini, the official WhatsApp Cloud API, WhatsApp Flows, calendar booking and human escalation",
+  "description": "Meenace: a private WhatsApp assistant for the Kalvion trading desk, powered by Gemini on the official WhatsApp Cloud API",
+  "type": "module",
   "main": "src/server.ts",
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
     "start": "tsx src/server.ts",
     "typecheck": "tsc --noEmit",
-    "test": "DATA_DIR=$(mktemp -d) GEMINI_API_KEY= SIMULATION_MODE=true tsx test/runAllTests.ts"
+    "test": "DATA_DIR=$(mktemp -d) tsx test/runAllTests.ts"
   },
   "dependencies": {
     "@google/genai": "^3.0.0",
